@@ -2,6 +2,9 @@ name: Precios y fotos de eBay
 on:
   schedule:
     - cron: '17 2 * * *'      # cada noche (hora UTC)
+  push:
+    branches: [main]
+    paths: ['run.env']        # para lanzar una búsqueda a mano: cambiar run.env
   workflow_dispatch:
     inputs:
       calls: { description: 'Búsquedas como mucho', default: '4500' }
@@ -21,7 +24,9 @@ jobs:
           EBAY_CERT_ID: ${{ secrets.EBAY_CERT_ID }}
           CALLS: ${{ github.event.inputs.calls || '4500' }}
           ONLY: ${{ github.event.inputs.only || '' }}
-        run: python3 tools/ebay.py
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [ -f run.env ]; then set -a; . ./run.env; set +a; fi
+          python3 tools/ebay.py
       - name: Guardar
         run: |
           git config user.name "AREA151 bot"; git config user.email "actions@users.noreply.github.com"
