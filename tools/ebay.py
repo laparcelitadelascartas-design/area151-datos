@@ -43,7 +43,7 @@ class Ebay:
             except Exception as e: print('  error', e, flush=True); time.sleep(3)
         return []
 
-BAD = re.compile(r'\b(psa|bgs|sgc|cgc|beckett|graded|gradead[ao]|slab|lote|lot|bundle|pack|sobre|caja|box|blaster|hobby|tin|album|álbum|set completo|complete set|elige|choose|pick|select your|you pick|a elegir|escoge)\b', re.I)
+BAD = re.compile(r'\b(psa|bgs|sgc|cgc|beckett|graded|gradead[ao]|slab|lote|lot|lots|bundle|pack|sobre|sobres|caja|box|blaster|hobby|tin|album|álbum|set completo|complete set|colecci[oó]n|completa|elige|choose|pick|select your|you pick|a elegir|escoge|repes|duplicad[ao]s|x\s?\d{1,3}|\d{1,3}\s?x|\d+\s?(cartas|cards|cromos)|(cartas|cards|cromos)\s?\d+)\b', re.I)
 def seasons_ok(s):
     """Formas de escribir la temporada o el año de la colección en un título"""
     toks = []
@@ -87,6 +87,9 @@ def main():
     os.makedirs('ebay', exist_ok=True)
     st_path = 'ebay/_state.json'
     state = json.load(open(st_path)) if os.path.exists(st_path) else {'q': {}}
+    for sid in [x for x in os.environ.get('RESET', '').split(',') if x]:   # volver a buscar desde cero una colección
+        state['q'] = {k: v for k, v in state['q'].items() if not k.startswith(sid + '|')}
+        if os.path.exists(f'ebay/{sid}.json'): os.remove(f'ebay/{sid}.json')
     lines = {}
     for s in cards: lines.setdefault(s['line'] or s['id'], []).append(s['id'])
     jobs = []   # (prioridad, colección, jugador)
