@@ -3,7 +3,7 @@
 - Busca anuncios activos en eBay España de cada jugador de cada colección (cards.json) y guarda, por carta:
   precio mediano en euros, número de anuncios, foto del anuncio que mejor encaja, enlace y fecha → ebay/<colección>.json
 - Las claves (EBAY_APP_ID, EBAY_CERT_ID) son secretos del repositorio: nunca se escriben en ningún archivo.
-- Cada noche gasta como mucho CALLS búsquedas (eBay da 5.000 al día): primero las cartas nunca buscadas, luego las más antiguas.
+- Cada noche gasta como mucho CALLS búsquedas (eBay da 5.000 al día; antes de empezar mira cuántas quedan): primero las colecciones de FIRST, luego las cartas nunca buscadas y luego las más antiguas.
 Solo librería estándar."""
 import base64, json, os, re, statistics, sys, time, unicodedata, urllib.error, urllib.parse, urllib.request
 CALLS = int(os.environ.get('CALLS', '4500'))
@@ -31,6 +31,18 @@ class Ebay:
         except urllib.error.HTTPError as e: sys.exit(f'eBay no acepta las claves ({e.code}): {e.read()[:300]!r}')
         self.tok, self.exp = d['access_token'], time.time() + int(d.get('expires_in', 7200))
         return self.tok
+    def quota(self):
+        """Búsquedas que quedan hoy y cuándo se renueva el cupo (Developer Analytics API; no gasta búsquedas)"""
+        u = API + '/developer/analytics/v1_beta/rate_limit/?' + urllib.parse.urlencode({'api_context': 'buy', 'api_name': 'browse'})
+        try:
+            d = json.loads(urllib.request.urlopen(urllib.request.Request(u, headers={'Authorization': 'Bearer ' + self.token()}), timeout=30).read())
+            for a in d.get('rateLimits', []):
+                for r in a.get('resources', []):
+                    if 'search' in r.get('name', '') or r.get('name') == 'buy.browse':
+                        x = (r.get('rates') or [{}])[0]
+                        return x.get('remaining'), x.get('limit'), x.get('reset')
+        except Exception as e: print('  cupo de eBay desconocido:', e, flush=True)
+        return None, None, None
     def search(self, q, limit=200):
         self.calls += 1; time.sleep(0.12)
         u = API + '/buy/browse/v1/item_summary/search?' + urllib.parse.urlencode({'q': q, 'limit': limit})
@@ -107,9 +119,12 @@ def main():
     jobs.sort()
     print(len(jobs), 'búsquedas pendientes; hoy como mucho', CALLS, flush=True)
     eb = Ebay(); by_set = {s['id']: s for s in cards}; out = {}; found = 0
+    left, lim, reset = eb.quota()
+    print(f'Cupo de eBay: quedan {left} de {lim}; se renueva {reset}', flush=True)
+    budget = CALLS if left is None else min(CALLS, max(0, int(left) - 10))
     try:
         for _, _, _, _, sid, player, cs in jobs:
-            if eb.calls >= CALLS: break
+            if eb.calls >= budget: break
             s = by_set[sid]
             if sid not in out:
                 f = f'ebay/{sid}.json'
