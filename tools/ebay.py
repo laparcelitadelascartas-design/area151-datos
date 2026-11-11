@@ -56,7 +56,7 @@ class Ebay:
             except Exception as e: print('  error', e, flush=True); time.sleep(3)
         return []
 
-BAD = re.compile(r'\b(psa|bgs|sgc|cgc|beckett|graded|gradead[ao]|slab|lote|lot|lots|bundle|pack|sobre|sobres|caja|box|blaster|hobby|tin|album|álbum|set completo|complete set|colecci[oó]n|completa|elige|choose|pick|select your|you pick|a elegir|escoge|repes|duplicad[ao]s|x\s?\d{1,3}|\d{1,3}\s?x|\d+\s?(cartas|cards|cromos)|(cartas|cards|cromos)\s?\d+)\b', re.I)
+BAD = re.compile(r'\b(psa|bgs|sgc|cgc|beckett|graded|gradead[ao]|slab|lote|lot|lots|bundle|pack|sobre|sobres|caja|box|blaster|hobby|tin|album|álbum|set completo|complete set|colecci[oó]n|completa|elige|choose|pick|select your|you pick|a elegir|escoge|a escoger|tu elecci[oó]n|faltas|missing|sueltas|discount|todas las ediciones|todos los cromos|repes|duplicad[ao]s|x\s?\d{1,3}|\d{1,3}\s?x|\d+\s?(cartas|cards|cromos)|(cartas|cards|cromos)\s?\d+)\b', re.I)
 def seasons_ok(s):
     """Formas de escribir la temporada o el año de la colección en un título"""
     toks = []
@@ -94,6 +94,20 @@ def pick(items, s, player, nums, kws, stoks, siblings):
         out.append({'t': t, 'v': v, 'img': img, 'url': it.get('itemWebUrl') or '', 'nums': [n for n in nums if num_hit(t, n)]})
     return out
 
+BASEISH = {'laliga', 'liga', 'base', 'coleccion', 'bis', 'ficha', 'fichas', 'fichaje', 'fichajes', 'equipo', 'equipos', 'spain', 'espana', 'nuevas', 'nuevos', 'nueva', 'nuevo', 'las', 'los', 'del', 'con', 'mgk', 'cards', 'card'}
+SPECIAL = {'power', 'elite', 'vip', 'rookie', 'novato', 'flash', 'flashback', 'limitada', 'autografo', 'firma', 'firmado', 'auto', 'special', 'iconos', 'icono', 'mvp', 'vertigo', 'fuego', 'magicos', 'evolution', 'golden', 'oro', 'gold', 'anthology', 'master', 'stars', 'enjoy', 'black', 'just', 'status', 'mega', 'parallel', 'paralelo', 'futuro'}
+def spec(sec): return frozenset(w for w in words(sec) if w not in BASEISH and len(w) >= 3)
+def by_series(title, cs):
+    """Carta del jugador a la que se refiere un anuncio sin número, por la serie que nombra el título"""
+    tw = set(words(title))
+    hit = [(len(spec(sec)), code) for code, _, sec in cs if spec(sec) and spec(sec) <= tw]
+    if hit:
+        top = max(h for h, _ in hit); best = [c for h, c in hit if h == top]
+        return best[0] if len(best) == 1 else None
+    if tw & SPECIAL: return None                       # dice una serie especial que no es de este jugador: mejor nada
+    base = [code for code, _, sec in cs if not spec(sec)]
+    return base[0] if len(base) == 1 else None
+
 DEBUG = []
 def main():
     cards = json.load(open(os.environ.get('CARDS', 'cards.json'), encoding='utf-8'))
@@ -109,7 +123,7 @@ def main():
     for s in cards:
         if ONLY and s['id'] not in ONLY: continue
         players = {}
-        for code, p, pn, t in s['cards']: players.setdefault(p.split('/')[0].strip(), []).append((code, pn))
+        for code, p, pn, t, *sec in s['cards']: players.setdefault(p.split('/')[0].strip(), []).append((code, pn, sec[0] if sec else ''))
         for p in players:
             last = state['q'].get(f"{s['id']}|{p}")
             age = 9999 if not last else (time.mktime(time.strptime(TODAY, '%Y-%m-%d')) - time.mktime(time.strptime(last, '%Y-%m-%d'))) / 86400
@@ -133,10 +147,11 @@ def main():
             items = eb.search(q)
             if eb.calls <= 40: DEBUG.append({'q': q, 'n': len(items), 'titles': [(i.get('title'), (i.get('price') or {}).get('value'), (i.get('price') or {}).get('currency')) for i in items[:25]]})
             stoks = seasons_ok(s); sib = len(lines.get(s['line'] or sid, [])) > 1
-            good = pick(items, s, player, [pn for _, pn in cs], s['kw'], stoks, sib)
-            for code, pn in cs:
-                # la carta concreta: anuncios con su número; si el jugador solo tiene una carta en la colección, todos
-                mine = [g for g in good if pn in g['nums']] or (good if len(cs) == 1 else [])
+            good = pick(items, s, player, [pn for _, pn, _ in cs], s['kw'], stoks, sib)
+            for code, pn, _ in cs:
+                # la carta concreta: anuncios con su número; si el jugador solo tiene una carta en la colección, todos;
+                # si tiene varias, los anuncios sin número que nombran la serie de esta carta (Élite, Power, Zona VIP…)
+                mine = [g for g in good if pn in g['nums']] or (good if len(cs) == 1 else [g for g in good if not g['nums'] and by_series(g['t'], cs) == code])
                 if not mine: out[sid]['c'].pop(code, None); continue
                 vals = sorted(g['v'] for g in mine); med = round(statistics.median(vals), 2)
                 best = min(mine, key=lambda g: abs(g['v'] - med))

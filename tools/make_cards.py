@@ -21,7 +21,7 @@ for s in cat['sets']:
     for c in s['cards']:
         p = c['p']; t = c.get('t'); t = teams[t] if isinstance(t, int) and t < len(teams) else (t or '')
         if re.match(r'^(escudo|team badge|badge|crest|emblem|checklist|index|índice)\b', p, re.I): continue
-        cards.append([c['n'], p, c.get('pn') or c['n'], t])
+        cards.append([c['n'], p, c.get('pn') or c['n'], t, (s.get('sections') or {}).get(c.get('s'), '')])
     out.append({'id': s['id'], 'name': s['name'], 'line': s.get('line', ''), 'season': s.get('season', ''), 'kw': [k for k in s.get('kw', []) if k not in ('topps', 'fifa', 'worldcup')], 'q': core(s['name']), 'cards': cards})
 json.dump(out, open('cards.json', 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
 print(len(out), 'colecciones,', sum(len(s['cards']) for s in out), 'cartas')
