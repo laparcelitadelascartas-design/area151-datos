@@ -10,6 +10,7 @@ CALLS = int(os.environ.get('CALLS', '4500'))
 MAX_AGE = int(os.environ.get('MAX_AGE_DAYS', '10'))
 ONLY = os.environ.get('ONLY', '').split(',') if os.environ.get('ONLY') else []
 MARKET = os.environ.get('MARKET', 'EBAY_ES')
+FIRST = [x for x in os.environ.get('FIRST', 'mgk').split(',') if x]
 TODAY = time.strftime('%Y-%m-%d')
 API = 'https://api.ebay.com'
 
@@ -87,9 +88,8 @@ def main():
     os.makedirs('ebay', exist_ok=True)
     st_path = 'ebay/_state.json'
     state = json.load(open(st_path)) if os.path.exists(st_path) else {'q': {}}
-    for sid in [x for x in os.environ.get('RESET', '').split(',') if x]:   # volver a buscar desde cero una colección
-        state['q'] = {k: v for k, v in state['q'].items() if not k.startswith(sid + '|')}
-        if os.path.exists(f'ebay/{sid}.json'): os.remove(f'ebay/{sid}.json')
+    for sid in [x for x in os.environ.get('RESET', '').split(',') if x]:   # volver a buscar una colección entera
+        state['q'] = {k: v for k, v in state['q'].items() if not k.startswith(sid + '|')}   # se vuelve a buscar (lo ya encontrado se queda hasta entonces)
     lines = {}
     for s in cards: lines.setdefault(s['line'] or s['id'], []).append(s['id'])
     jobs = []   # (prioridad, colección, jugador)
@@ -102,12 +102,13 @@ def main():
             last = state['q'].get(f"{s['id']}|{p}")
             age = 9999 if not last else (time.mktime(time.strptime(TODAY, '%Y-%m-%d')) - time.mktime(time.strptime(last, '%Y-%m-%d'))) / 86400
             if age < MAX_AGE: continue
-            jobs.append((0 if not last else 1, -age, order[s['id']], s['id'], p, players[p]))
+            first = 0 if any(s['id'].startswith(f) for f in FIRST) else 1   # colecciones con prioridad (FIRST=mgk)
+            jobs.append((first, 0 if not last else 1, -age, order[s['id']], s['id'], p, players[p]))
     jobs.sort()
     print(len(jobs), 'búsquedas pendientes; hoy como mucho', CALLS, flush=True)
     eb = Ebay(); by_set = {s['id']: s for s in cards}; out = {}; found = 0
     try:
-        for _, _, _, sid, player, cs in jobs:
+        for _, _, _, _, sid, player, cs in jobs:
             if eb.calls >= CALLS: break
             s = by_set[sid]
             if sid not in out:
