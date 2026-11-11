@@ -30,7 +30,7 @@ class Ebay:
         except urllib.error.HTTPError as e: sys.exit(f'eBay no acepta las claves ({e.code}): {e.read()[:300]!r}')
         self.tok, self.exp = d['access_token'], time.time() + int(d.get('expires_in', 7200))
         return self.tok
-    def search(self, q, limit=50):
+    def search(self, q, limit=200):
         self.calls += 1; time.sleep(0.12)
         u = API + '/buy/browse/v1/item_summary/search?' + urllib.parse.urlencode({'q': q, 'limit': limit})
         req = urllib.request.Request(u, headers={'Authorization': 'Bearer ' + self.token(), 'X-EBAY-C-MARKETPLACE-ID': MARKET, 'Accept-Language': 'es-ES'})
