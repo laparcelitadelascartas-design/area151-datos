@@ -6,7 +6,7 @@
 - Cada noche gasta como mucho CALLS búsquedas (eBay da 5.000 al día; antes de empezar mira cuántas quedan): primero las colecciones de FIRST, luego las cartas nunca buscadas y luego las más antiguas.
 Solo librería estándar."""
 import base64, json, os, re, statistics, sys, time, unicodedata, urllib.error, urllib.parse, urllib.request
-CALLS = int(os.environ.get('CALLS', '4500'))
+CALLS = int(os.environ.get('CALLS', '4990'))
 MAX_AGE = int(os.environ.get('MAX_AGE_DAYS', '10'))
 ONLY = os.environ.get('ONLY', '').split(',') if os.environ.get('ONLY') else []
 MARKET = os.environ.get('MARKET', 'EBAY_ES')

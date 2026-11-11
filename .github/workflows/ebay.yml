@@ -1,13 +1,13 @@
 name: Precios y fotos de eBay
 on:
   schedule:
-    - cron: '17 2 * * *'      # cada noche (hora UTC)
+    - cron: '23 8 * * *'      # justo después de que eBay renueve el cupo (08:00 UTC)
   push:
     branches: [main]
     paths: ['run.env']        # para lanzar una búsqueda a mano: cambiar run.env
   workflow_dispatch:
     inputs:
-      calls: { description: 'Búsquedas como mucho', default: '4500' }
+      calls: { description: 'Búsquedas como mucho', default: '4990' }
       only: { description: 'Solo estas colecciones (ids separados por comas)', default: '' }
 permissions:
   contents: write
@@ -22,7 +22,7 @@ jobs:
         env:
           EBAY_APP_ID: ${{ secrets.EBAY_APP_ID }}
           EBAY_CERT_ID: ${{ secrets.EBAY_CERT_ID }}
-          CALLS: ${{ github.event.inputs.calls || '4500' }}
+          CALLS: ${{ github.event.inputs.calls || '4990' }}
           ONLY: ${{ github.event.inputs.only || '' }}
         run: |
           if [ "${{ github.event_name }}" = "push" ] && [ -f run.env ]; then set -a; . ./run.env; set +a; fi
