@@ -1,6 +1,6 @@
 # AREA151 · datos
 
-Datos públicos que usa la app AREA151 Scan para las cartas de fútbol: foto y precio de anuncios activos de eBay España, buscados cada noche con la API oficial de eBay (Browse API).
+Datos públicos que usa la app AREA151 Scan para las cartas de fútbol: foto y precio de anuncios activos de eBay España, buscados cada día a las 08:23 UTC (justo cuando eBay renueva el cupo de 5.000 búsquedas) con la API oficial de eBay (Browse API).
 
 - `cards.json`: las cartas que se buscan (generado desde los listados de la app con `tools/make_cards.py`).
 - `ebay/<colección>.json`: por carta, `[precio mediano €, nº de anuncios, foto, enlace al anuncio, fecha, precio más bajo €]`.
