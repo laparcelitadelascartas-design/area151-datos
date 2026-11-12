@@ -13,6 +13,10 @@ MARKET = os.environ.get('MARKET', 'EBAY_ES')
 FIRST = [x for x in os.environ.get('FIRST', 'mgk').split(',') if x]
 TODAY = time.strftime('%Y-%m-%d')
 API = 'https://api.ebay.com'
+STALE = int(os.environ.get('STALE_DAYS', '30'))   # un precio sin anuncios activos se deja de mostrar a los 30 días (la foto se queda)
+LANG = {'EBAY_ES': 'es-ES', 'EBAY_IT': 'it-IT', 'EBAY_DE': 'de-DE', 'EBAY_FR': 'fr-FR', 'EBAY_GB': 'en-GB', 'EBAY_US': 'en-US'}
+# segunda pasada, solo para las cartas que aún no tienen foto: otra búsqueda en España y luego otros eBay (los que no son en euros, solo para la foto)
+ALT = [('EBAY_ES', 'corta'), ('EBAY_IT', 'llena'), ('EBAY_FR', 'llena'), ('EBAY_DE', 'llena'), ('EBAY_GB', 'llena'), ('EBAY_US', 'llena')]
 
 def norm(s): return re.sub(r'[^a-z0-9]', '', unicodedata.normalize('NFD', str(s or '').lower()).encode('ascii', 'ignore').decode())
 def words(s): return [w for w in re.split(r'[^a-z0-9]+', unicodedata.normalize('NFD', str(s or '').lower()).encode('ascii', 'ignore').decode()) if w]
@@ -43,10 +47,11 @@ class Ebay:
                         return x.get('remaining'), x.get('limit'), x.get('reset')
         except Exception as e: print('  cupo de eBay desconocido:', e, flush=True)
         return None, None, None
-    def search(self, q, limit=200):
+    def search(self, q, limit=200, market=None):
         self.calls += 1; time.sleep(0.12)
+        market = market or MARKET
         u = API + '/buy/browse/v1/item_summary/search?' + urllib.parse.urlencode({'q': q, 'limit': limit})
-        req = urllib.request.Request(u, headers={'Authorization': 'Bearer ' + self.token(), 'X-EBAY-C-MARKETPLACE-ID': MARKET, 'Accept-Language': 'es-ES'})
+        req = urllib.request.Request(u, headers={'Authorization': 'Bearer ' + self.token(), 'X-EBAY-C-MARKETPLACE-ID': market, 'Accept-Language': LANG.get(market, 'es-ES')})
         for attempt in range(3):
             try: return json.loads(urllib.request.urlopen(req, timeout=30).read()).get('itemSummaries', [])
             except urllib.error.HTTPError as e:
@@ -56,7 +61,7 @@ class Ebay:
             except Exception as e: print('  error', e, flush=True); time.sleep(3)
         return []
 
-BAD = re.compile(r'\b(psa|bgs|sgc|cgc|beckett|graded|gradead[ao]|slab|lote|lot|lots|bundle|pack|sobre|sobres|caja|box|blaster|hobby|tin|album|álbum|set completo|complete set|colecci[oó]n|completa|elige|choose|pick|select your|you pick|a elegir|escoge|a escoger|tu elecci[oó]n|faltas|missing|sueltas|discount|todas las ediciones|todos los cromos|repes|duplicad[ao]s|x\s?\d{1,3}|\d{1,3}\s?x|\d+\s?(cartas|cards|cromos)|(cartas|cards|cromos)\s?\d+)\b', re.I)
+BAD = re.compile(r'\b(psa|bgs|sgc|cgc|beckett|graded|gradead[ao]|slab|lote|lot|lots|bundle|pack|sobre|sobres|caja|box|blaster|hobby|tin|album|álbum|set completo|complete set|colecci[oó]n|completa|elige|choose|pick|select your|you pick|a elegir|escoge|a escoger|tu elecci[oó]n|lotto|scegli|a scelta|bustin[ae]|konvolut|sammlung|auswahl|aussuchen|au choix|lot de|faltas|missing|sueltas|discount|todas las ediciones|todos los cromos|repes|duplicad[ao]s|x\s?\d{1,3}|\d{1,3}\s?x|\d+\s?(cartas|cards|cromos)|(cartas|cards|cromos)\s?\d+)\b', re.I)
 def seasons_ok(s):
     """Formas de escribir la temporada o el año de la colección en un título"""
     toks = []
@@ -89,9 +94,10 @@ def pick(items, s, player, nums, kws, stoks, siblings):
         pr = it.get('price') or {}
         try: v = float(pr.get('value'))
         except Exception: continue
-        if pr.get('currency') != 'EUR': continue
+        eur = pr.get('currency') == 'EUR'
         img = ((it.get('image') or {}).get('imageUrl')) or (((it.get('thumbnailImages') or [{}])[0]).get('imageUrl'))
-        out.append({'t': t, 'v': v, 'img': img, 'url': it.get('itemWebUrl') or '', 'nums': [n for n in nums if num_hit(t, n)]})
+        if not img: continue
+        out.append({'t': t, 'v': v, 'eur': eur, 'img': img, 'url': it.get('itemWebUrl') or '', 'nums': [n for n in nums if num_hit(t, n)]})
     return out
 
 BASEISH = {'laliga', 'liga', 'base', 'coleccion', 'bis', 'ficha', 'fichas', 'fichaje', 'fichajes', 'equipo', 'equipos', 'spain', 'espana', 'nuevas', 'nuevos', 'nueva', 'nuevo', 'las', 'los', 'del', 'con', 'mgk', 'cards', 'card'}
@@ -109,6 +115,40 @@ def by_series(title, cs):
     return base[0] if len(base) == 1 else None
 
 DEBUG = []
+def days(d):
+    try: return (time.mktime(time.strptime(TODAY, '%Y-%m-%d')) - time.mktime(time.strptime(d, '%Y-%m-%d'))) / 86400
+    except Exception: return 9999
+def search_player(eb, s, player, cs, q, market, have, lines, fill_only=False):
+    """Busca un jugador de una colección y apunta en `have` (código → [mediana €, anuncios, foto, enlace, fecha, mínimo €]) lo encontrado.
+    fill_only: solo cartas sin foto (segunda pasada). Una foto ya encontrada no se borra nunca; el precio sin anuncios activos caduca a los STALE días."""
+    items = eb.search(q, market=market)
+    if eb.calls <= 40: DEBUG.append({'q': q, 'm': market, 'n': len(items), 'titles': [(i.get('title'), (i.get('price') or {}).get('value'), (i.get('price') or {}).get('currency')) for i in items[:25]]})
+    stoks = seasons_ok(s); sib = len(lines.get(s['line'] or s['id'], [])) > 1
+    good = pick(items, s, player, [pn for _, pn, _ in cs], s['kw'], stoks, sib)
+    if fill_only:   # búsqueda más abierta: el anuncio tiene que llevar el número o el nombre entero (no vale otro «Rodríguez»)
+        full = [w for w in words(player.split('/')[0]) if len(w) >= 3]
+        good = [g for g in good if g['nums'] or all(w in norm(g['t']) for w in full)]
+    n = 0
+    for code, pn, _ in cs:
+        old = have.get(code)
+        if fill_only and old and old[2]: continue
+        # la carta concreta: anuncios con su número; si el jugador solo tiene una carta en la colección, todos;
+        # si tiene varias, los anuncios sin número que nombran la serie de esta carta (Élite, Power, Zona VIP…)
+        mine = [g for g in good if pn in g['nums']] or (good if len(cs) == 1 else [g for g in good if not g['nums'] and by_series(g['t'], cs) == code])
+        if not mine:
+            if old and old[0] and days(old[4]) > STALE: have[code] = [0, 0, old[2], old[3], old[4], 0]   # sin anuncios desde hace tiempo: foto sí, precio no
+            continue
+        eur = [g for g in mine if g['eur']]
+        if eur:
+            vals = sorted(g['v'] for g in eur); med = round(statistics.median(vals), 2)
+            best = min(eur, key=lambda g: abs(g['v'] - med))
+            have[code] = [med, len(eur), best['img'], best['url'], TODAY, round(vals[0], 2)]
+        else:
+            best = mine[0]
+            have[code] = [old[0], old[1], best['img'], best['url'], old[4], old[5]] if old else [0, 0, best['img'], best['url'], TODAY, 0]
+        n += 1
+    return n
+
 def main():
     cards = json.load(open(os.environ.get('CARDS', 'cards.json'), encoding='utf-8'))
     os.makedirs('ebay', exist_ok=True)
@@ -136,29 +176,45 @@ def main():
     left, lim, reset = eb.quota()
     print(f'Cupo de eBay: quedan {left} de {lim}; se renueva {reset}', flush=True)
     budget = CALLS if left is None else min(CALLS, max(0, int(left) - 10))
+    def book(sid):
+        if sid not in out:
+            f = f'ebay/{sid}.json'
+            out[sid] = json.load(open(f)) if os.path.exists(f) else {'name': by_set[sid]['name'], 'c': {}}
+        return out[sid]['c']
+    def missing(phase):
+        """Jugadores con alguna carta aún sin foto → otra búsqueda u otro eBay (uno distinto cada día)"""
+        res = []
+        for s in cards:
+            if ONLY and s['id'] not in ONLY: continue
+            if (0 if any(s['id'].startswith(x) for x in FIRST) else 1) != phase: continue
+            have = book(s['id']); players = {}
+            for code, p, pn, t, *sec in s['cards']: players.setdefault(p.split('/')[0].strip(), []).append((code, pn, sec[0] if sec else ''))
+            for p, cs in players.items():
+                if all(have.get(c) and have[c][2] for c, _, _ in cs): continue
+                nxt = [i for i in range(len(ALT)) if str(i) not in state['alt'].get(f"{s['id']}|{p}", [])]
+                if nxt: res.append((s['id'], p, cs, nxt[0]))
+        return res
+    state.setdefault('alt', {})
     try:
-        for _, _, _, _, sid, player, cs in jobs:
+        # primero las colecciones de FIRST (búsqueda normal y luego la segunda pasada), después el resto igual
+        for phase in (0, 1):
+            for first, _, _, _, sid, player, cs in jobs:
+                if first != phase: continue
+                if eb.calls >= budget: break
+                s = by_set[sid]
+                found += search_player(eb, s, player, cs, f"{s['q']} {player}", 'EBAY_ES', book(sid), lines)
+                state['q'][f'{sid}|{player}'] = TODAY
+                if eb.calls % 100 == 0: print(f'  {eb.calls} búsquedas, {found} cartas encontradas', flush=True)
             if eb.calls >= budget: break
-            s = by_set[sid]
-            if sid not in out:
-                f = f'ebay/{sid}.json'
-                out[sid] = json.load(open(f)) if os.path.exists(f) else {'name': s['name'], 'c': {}}
-            q = f"{s['q']} {player}"
-            items = eb.search(q)
-            if eb.calls <= 40: DEBUG.append({'q': q, 'n': len(items), 'titles': [(i.get('title'), (i.get('price') or {}).get('value'), (i.get('price') or {}).get('currency')) for i in items[:25]]})
-            stoks = seasons_ok(s); sib = len(lines.get(s['line'] or sid, [])) > 1
-            good = pick(items, s, player, [pn for _, pn, _ in cs], s['kw'], stoks, sib)
-            for code, pn, _ in cs:
-                # la carta concreta: anuncios con su número; si el jugador solo tiene una carta en la colección, todos;
-                # si tiene varias, los anuncios sin número que nombran la serie de esta carta (Élite, Power, Zona VIP…)
-                mine = [g for g in good if pn in g['nums']] or (good if len(cs) == 1 else [g for g in good if not g['nums'] and by_series(g['t'], cs) == code])
-                if not mine: out[sid]['c'].pop(code, None); continue
-                vals = sorted(g['v'] for g in mine); med = round(statistics.median(vals), 2)
-                best = min(mine, key=lambda g: abs(g['v'] - med))
-                out[sid]['c'][code] = [med, len(mine), best['img'], best['url'], TODAY, round(vals[0], 2)]
-                found += 1
-            state['q'][f'{sid}|{player}'] = TODAY
-            if eb.calls % 100 == 0: print(f'  {eb.calls} búsquedas, {found} cartas con precio', flush=True)
+            miss = missing(phase)
+            print(len(miss), 'jugadores con cartas sin foto (' + ('prioritarias' if phase == 0 else 'resto') + '): segunda pasada', flush=True)
+            for sid, player, cs, i in miss:
+                if eb.calls >= budget: break
+                s = by_set[sid]; market, how = ALT[i]
+                sur = [w for w in re.split(r'\s+', player) if len(w) >= 3]
+                q = f"{s['q']} {sur[-1] if (how == 'corta' and sur) else player}"
+                found += search_player(eb, s, player, cs, q, market, book(sid), lines, fill_only=True)
+                state['alt'].setdefault(f'{sid}|{player}', []).append(str(i))
     except RuntimeError as e:
         print('Parada:', e, flush=True)
     for sid, d in out.items():
@@ -168,9 +224,10 @@ def main():
     idx = {}
     for f in sorted(os.listdir('ebay')):
         if f.endswith('.json') and not f.startswith('_'):
-            d = json.load(open('ebay/' + f)); idx[f[:-5]] = {'v': d.get('v'), 'n': len(d.get('c', {}))}
+            d = json.load(open('ebay/' + f)); c = d.get('c', {})
+            idx[f[:-5]] = {'v': d.get('v'), 'n': sum(1 for x in c.values() if x[2]), 'p': sum(1 for x in c.values() if x[0])}
     json.dump(idx, open('ebay/_index.json', 'w'), separators=(',', ':'))
     if DEBUG: json.dump(DEBUG, open('ebay/_debug.json', 'w', encoding='utf-8'), ensure_ascii=False, indent=0)
-    print(f'Hecho: {eb.calls} búsquedas, {found} cartas con precio en esta pasada', flush=True)
+    print(f'Hecho: {eb.calls} búsquedas, {found} cartas encontradas en esta pasada', flush=True)
 
 if __name__ == '__main__': main()
