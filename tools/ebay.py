@@ -103,6 +103,10 @@ def pick(items, s, player, nums, kws, stoks, siblings):
 BASEISH = {'laliga', 'liga', 'base', 'coleccion', 'bis', 'ficha', 'fichas', 'fichaje', 'fichajes', 'equipo', 'equipos', 'spain', 'espana', 'nuevas', 'nuevos', 'nueva', 'nuevo', 'las', 'los', 'del', 'con', 'mgk', 'cards', 'card'}
 SPECIAL = {'power', 'elite', 'vip', 'rookie', 'novato', 'flash', 'flashback', 'limitada', 'autografo', 'firma', 'firmado', 'auto', 'special', 'iconos', 'icono', 'mvp', 'vertigo', 'fuego', 'magicos', 'evolution', 'golden', 'oro', 'gold', 'anthology', 'master', 'stars', 'enjoy', 'black', 'just', 'status', 'mega', 'parallel', 'paralelo', 'futuro'}
 def spec(sec): return frozenset(w for w in words(sec) if w not in BASEISH and len(w) >= 3)
+def other_series(title, cs, code):
+    """El título nombra una serie de otra carta del mismo jugador que esta no tiene (Power en una Élite normal…)"""
+    tw = set(words(title)); mine = next((spec(sec) for c, _, sec in cs if c == code), frozenset())
+    return any(spec(sec) - mine and (spec(sec) - mine) <= tw for c, _, sec in cs if c != code)
 def by_series(title, cs):
     """Carta del jugador a la que se refiere un anuncio sin número, por la serie que nombra el título"""
     tw = set(words(title))
@@ -134,7 +138,7 @@ def search_player(eb, s, player, cs, q, market, have, lines, fill_only=False):
         if fill_only and old and old[2]: continue
         # la carta concreta: anuncios con su número; si el jugador solo tiene una carta en la colección, todos;
         # si tiene varias, los anuncios sin número que nombran la serie de esta carta (Élite, Power, Zona VIP…)
-        mine = [g for g in good if pn in g['nums']] or (good if len(cs) == 1 else [g for g in good if not g['nums'] and by_series(g['t'], cs) == code])
+        mine = [g for g in good if pn in g['nums'] and not other_series(g['t'], cs, code)] or (good if len(cs) == 1 else [g for g in good if not g['nums'] and by_series(g['t'], cs) == code])
         if not mine:
             if old and old[0] and days(old[4]) > STALE: have[code] = [0, 0, old[2], old[3], old[4], 0]   # sin anuncios desde hace tiempo: foto sí, precio no
             continue
