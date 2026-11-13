@@ -83,6 +83,8 @@ def main():
         if got: F[sid] = got
         print(sid, len(got), 'fotos', sum(1 for g in got if g[2]), 'con borde', f'{time.time() - t0:.0f}s', flush=True)
     allv = np.array([f for g in F.values() for _, f, _ in g]); sd = allv.std(0) + 1e-3
+    clean = lambda g: [x for x in g if x[2]] if sum(1 for x in g if x[2]) >= 8 else g   # con borde encontrado, si hay al menos 8
+    if os.environ.get('CLEAN', '1') == '1': F = {sid: clean(g) for sid, g in F.items()}
     out = {'v': time.strftime('%Y-%m-%d'), 'gw': GW, 'gh': GH, 'sd': [round(float(x), 4) for x in sd],
            'sets': {sid: [round(float(x), 4) for x in np.median(np.array([f for _, f, _ in g]), 0)] for sid, g in F.items() if len(g) >= 5},
            'mad': {sid: [round(float(x), 4) for x in np.median(np.abs(np.array([f for _, f, _ in g]) - np.median(np.array([f for _, f, _ in g]), 0)), 0) + sd * .15] for sid, g in F.items() if len(g) >= 5}}
