@@ -1,0 +1,27 @@
+name: Fotos de Yu-Gi-Oh!
+on:
+  schedule:
+    - cron: '41 3 * * 1'      # los lunes: solo las cartas nuevas
+  push:
+    branches: [main]
+    paths: ['tools/ygo_img.py', '.github/workflows/ygo.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: { group: ygo, cancel-in-progress: false }
+jobs:
+  ygo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bajar las fotos que faltan
+        run: python3 tools/ygo_img.py
+      - name: Guardar
+        run: |
+          git config user.name "AREA151 bot"; git config user.email "actions@users.noreply.github.com"
+          git add ygo
+          git diff --cached --quiet && exit 0
+          git commit -qm "Yu-Gi-Oh!: fotos $(date -u +%F)"
+          for i in 1 2 3 4 5; do git pull -q --rebase origin main && git push && exit 0; sleep 20; done
+          exit 1
