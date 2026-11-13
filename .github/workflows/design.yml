@@ -1,0 +1,31 @@
+name: Huella de diseño de las colecciones
+on:
+  schedule:
+    - cron: '17 4 * * 0'      # los domingos, con las fotos nuevas de eBay
+  push:
+    branches: [main]
+    paths: ['tools/design_fp.py', '.github/workflows/design.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: { group: design, cancel-in-progress: false }
+jobs:
+  design:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with: { sparse-checkout: "/*\n!/ygo/img/", sparse-checkout-cone-mode: false }
+      - name: Calcular
+        env: { EVAL: '1' }
+        run: |
+          pip install -q opencv-python-headless numpy
+          python3 tools/design_fp.py
+      - name: Guardar
+        run: |
+          git config user.name "AREA151 bot"; git config user.email "actions@users.noreply.github.com"
+          git add design.json
+          git diff --cached --quiet && exit 0
+          git commit -qm "Huella de diseño $(date -u +%F)"
+          for i in 1 2 3 4 5; do git pull -q --rebase origin main && git push && exit 0; sleep 20; done
+          exit 1
