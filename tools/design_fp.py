@@ -84,7 +84,8 @@ def main():
         print(sid, len(got), 'fotos', sum(1 for g in got if g[2]), 'con borde', f'{time.time() - t0:.0f}s', flush=True)
     allv = np.array([f for g in F.values() for _, f, _ in g]); sd = allv.std(0) + 1e-3
     out = {'v': time.strftime('%Y-%m-%d'), 'gw': GW, 'gh': GH, 'sd': [round(float(x), 4) for x in sd],
-           'sets': {sid: [round(float(x), 4) for x in np.median(np.array([f for _, f, _ in g]), 0)] for sid, g in F.items() if len(g) >= 5}}
+           'sets': {sid: [round(float(x), 4) for x in np.median(np.array([f for _, f, _ in g]), 0)] for sid, g in F.items() if len(g) >= 5},
+           'mad': {sid: [round(float(x), 4) for x in np.median(np.abs(np.array([f for _, f, _ in g]) - np.median(np.array([f for _, f, _ in g]), 0)), 0) + sd * .15] for sid, g in F.items() if len(g) >= 5}}
     json.dump(out, open(os.path.join(ROOT, 'design.json'), 'w'), separators=(',', ':'))
     print('design.json:', len(out['sets']), 'colecciones')
     if os.environ.get('EVAL'):
@@ -94,18 +95,26 @@ def main():
         for sid, nm in names.items():
             for code, n in nm.items(): byname.setdefault(norm(n.split('/')[0]), set()).add(sid)
         med = {sid: np.median(np.array([f for _, f, _ in g]), 0) for sid, g in F.items()}
-        tot = ok = 0; per = {}
-        for sid, g in F.items():
-            arr = np.array([f for _, f, _ in g])
-            for i, (code, f, _) in enumerate(g):
-                cand = [x for x in byname.get(norm(names[sid][code].split('/')[0]), set()) if x in med]
-                if len(cand) < 2: continue
-                loo = np.median(np.delete(arr, i, 0), 0) if len(arr) > 2 else med[sid]
-                dist = {x: float(np.abs((f - (loo if x == sid else med[x])) / sd).mean()) for x in cand}
-                hit = min(dist, key=dist.get) == sid
-                tot += 1; ok += hit; per.setdefault(sid, [0, 0]); per[sid][0] += hit; per[sid][1] += 1
-        print(f'EVAL: {ok}/{tot} = {100 * ok / max(1, tot):.0f} % eligiendo entre las colecciones del mismo jugador')
-        for sid, (a, b) in sorted(per.items()): print(f'  {sid:14} {a}/{b}')
+        mad = {sid: np.median(np.abs(np.array([f for _, f, _ in g]) - med[sid]), 0) + sd * .15 for sid, g in F.items()}
+        # casillas del borde (el marco de la colección); las del centro son la foto del jugador, que cambia en cada carta
+        border = np.array([((r in (0, GH - 1)) or (c in (0, GW - 1))) for r in range(GH) for c in range(GW) for _ in range(3)] + [True] * 12)
+        variants = {'todo': (np.ones_like(border), False), 'borde': (border, False), 'borde+dispersion': (border, True), 'todo+dispersion': (np.ones_like(border), True)}
+        chance = []
+        for name, (mask, usemad) in variants.items():
+            tot = ok = 0; per = {}
+            for sid, g in F.items():
+                arr = np.array([f for _, f, _ in g])
+                for i, (code, f, _) in enumerate(g):
+                    cand = [x for x in byname.get(norm(names[sid][code].split('/')[0]), set()) if x in med]
+                    if len(cand) < 2: continue
+                    if name == 'todo': chance.append(1 / len(cand))
+                    loo = np.median(np.delete(arr, i, 0), 0) if len(arr) > 2 else med[sid]
+                    dist = {x: float((np.abs(f - (loo if x == sid else med[x])) / (mad[x] if usemad else sd))[mask].mean()) for x in cand}
+                    hit = min(dist, key=dist.get) == sid
+                    tot += 1; ok += hit; per.setdefault(sid, [0, 0]); per[sid][0] += hit; per[sid][1] += 1
+            print(f'EVAL {name}: {ok}/{tot} = {100 * ok / max(1, tot):.0f} % (al azar {100 * sum(chance) / max(1, len(chance)):.0f} %)')
+            if name == 'borde+dispersion':
+                for sid, (a, b) in sorted(per.items()): print(f'  {sid:14} {a}/{b}')
 
 
 if __name__ == '__main__':
